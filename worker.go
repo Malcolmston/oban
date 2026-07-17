@@ -13,6 +13,8 @@ import (
 // attempts remain) or discards the job. Perform should honor ctx cancellation
 // for long-running work.
 type Worker interface {
+	// Perform executes the job and returns nil on success or an error to
+	// trigger a retry or discard.
 	Perform(ctx context.Context, job *Job) error
 }
 
