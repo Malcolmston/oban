@@ -1,0 +1,76 @@
+name: Pages
+
+# Builds the React (TypeScript + Tailwind) landing site in web/ and publishes it
+# to GitHub Pages, with the dependency-free go/doc API reference preserved under
+# /api. Enable with Settings -> Pages -> Build and deployment -> Source:
+# "GitHub Actions".
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; newer runs supersede queued ones.
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Emit the machine-readable API docs the React "Docs" tab renders. Placed
+      # in web/public so Vite bundles it into dist/doc.json (served at
+      # /oban/doc.json).
+      - name: Generate API doc.json
+        run: go run ./docs/gen -json web/public/doc.json
+
+      - name: Build landing site
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      # Also publish the standalone static HTML reference at /oban/api/ as a
+      # secondary, dependency-free browsable view.
+      - name: Generate API docs under /api
+        run: go run ./docs/gen -out web/dist/api
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

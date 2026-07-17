@@ -1,0 +1,3 @@
+[submodule "web/vendor/go"]
+	path = web/vendor/go
+	url = https://github.com/malcolmston/go
