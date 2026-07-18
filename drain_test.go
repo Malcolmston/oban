@@ -205,7 +205,9 @@ func TestDrainSentinels(t *testing.T) {
 				capStore = newDrainCapStore()
 				store = capStore
 			} else {
-				store = NewInMemoryStore()
+				// caplessStore lacks the optional capabilities; InMemoryStore
+				// itself now implements them, so the incapable path uses this.
+				store = newCaplessStore()
 			}
 			drainEnqueue(t, store, "w")
 

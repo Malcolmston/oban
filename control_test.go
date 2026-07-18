@@ -220,8 +220,9 @@ func TestControlledStoreDelegates(t *testing.T) {
 
 func TestControllerUnsupportedStore(t *testing.T) {
 	ctx := context.Background()
-	// InMemoryStore implements none of the optional capabilities.
-	store := NewInMemoryStore()
+	// caplessStore exposes only the core Store interface, none of the optional
+	// capabilities (InMemoryStore itself now implements them all).
+	store := newCaplessStore()
 	ids := controlSeed(t, store, "q", 1)
 	ctrl := NewController(store, newFakeClock(baseTime))
 

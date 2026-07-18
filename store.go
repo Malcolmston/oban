@@ -72,11 +72,21 @@ type InMemoryStore struct {
 	mu     sync.Mutex
 	jobs   map[int64]*Job
 	nextID int64
+
+	// tags and meta hold the side-channel labels and metadata persisted through
+	// the [TaggableStore] capability, keyed by job ID. They are kept separate
+	// from the [Job] struct, which does not itself carry tags or meta.
+	tags map[int64][]string
+	meta map[int64]map[string]any
 }
 
 // NewInMemoryStore returns an empty [InMemoryStore].
 func NewInMemoryStore() *InMemoryStore {
-	return &InMemoryStore{jobs: make(map[int64]*Job)}
+	return &InMemoryStore{
+		jobs: make(map[int64]*Job),
+		tags: make(map[int64][]string),
+		meta: make(map[int64]map[string]any),
+	}
 }
 
 // Enqueue implements [Store].
