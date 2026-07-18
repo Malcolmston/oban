@@ -21,9 +21,13 @@ import (
 // (1-5) and steps (*/2 or 1-10/3). Month and day-of-week accept three-letter
 // English names.
 //
-// When both day-of-month and day-of-week are restricted (neither is *), a time
-// matches if it satisfies either field, following the traditional Vixie cron
-// rule. If one of them is *, the other alone constrains the day.
+// Day-of-month and day-of-week are combined with AND: a time matches only when
+// it satisfies both fields simultaneously. This mirrors Elixir Oban's
+// Oban.Cron.Expression, which requires every field (month, weekday, day, hour,
+// minute) to match. Because a "*" field expands to its full range, an
+// unrestricted day-of-month or day-of-week is always satisfied and the other
+// field then constrains the day on its own. Note this differs from the
+// traditional Vixie cron OR rule for the two day fields.
 type Schedule struct {
 	expr    string
 	minutes uint64 // bit i set => minute i allowed (0-59)
@@ -31,8 +35,6 @@ type Schedule struct {
 	doms    uint64 // bits 1-31
 	months  uint64 // bits 1-12
 	dows    uint64 // bits 0-6 (Sunday=0)
-	domStar bool   // day-of-month field was "*"
-	dowStar bool   // day-of-week field was "*"
 }
 
 // String returns the original cron expression.
@@ -85,9 +87,41 @@ func ParseCron(expr string) (*Schedule, error) {
 		s.dows = (s.dows &^ (1 << 7)) | 1
 	}
 
-	s.domStar = fields[2] == "*"
-	s.dowStar = fields[4] == "*"
+	if err := validateDayMonth(fields[2], fields[3], s.doms, s.months); err != nil {
+		return nil, err
+	}
 	return s, nil
+}
+
+// maxDaysPerMonth is the largest day-of-month each month can ever have, using 29
+// for February so that leap-year schedules such as "0 0 29 2 *" remain valid.
+// It matches the table Elixir Oban uses to reject impossible day/month pairings.
+var maxDaysPerMonth = [13]int{0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+
+// validateDayMonth rejects a schedule whose day-of-month and month fields can
+// never align, e.g. "0 0 30 2 *" (February never has 30 days) or "0 0 31 4 *"
+// (April never has 31). When either field is a wildcard the pairing is always
+// satisfiable, matching Oban's Oban.Cron.Expression.validate_days/4. Otherwise
+// the schedule is valid as long as at least one allowed day can occur in at
+// least one allowed month.
+func validateDayMonth(dayField, monField string, doms, months uint64) error {
+	if dayField == "*" || monField == "*" {
+		return nil
+	}
+	for month := 1; month <= 12; month++ {
+		if months&(1<<uint(month)) == 0 {
+			continue
+		}
+		for day := 1; day <= 31; day++ {
+			if doms&(1<<uint(day)) == 0 {
+				continue
+			}
+			if day <= maxDaysPerMonth[month] {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("oban: cron: no day in %q can occur in months %q", dayField, monField)
 }
 
 // MustParseCron is like [ParseCron] but panics on error. It is meant for
@@ -115,8 +149,10 @@ func parseField(field string, spec cronField) (uint64, error) {
 
 func parsePart(part string, spec cronField) (uint64, error) {
 	step := 1
+	hasStep := false
 	rangePart := part
 	if slash := strings.IndexByte(part, '/'); slash >= 0 {
+		hasStep = true
 		rangePart = part[:slash]
 		stepStr := part[slash+1:]
 		var err error
@@ -144,7 +180,15 @@ func parsePart(part string, spec cronField) (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
-		lo, hi = v, v
+		// A bare value with a step (e.g. "1/7") is treated as the open range
+		// "value-max/step", so "1/7" on hours yields 1,8,15,22 — matching how
+		// Oban's parse_range interprets "N/step". Without a step it is a single
+		// value.
+		if hasStep {
+			lo, hi = v, spec.max
+		} else {
+			lo, hi = v, v
+		}
 	}
 
 	if lo > hi {
@@ -214,18 +258,12 @@ func (s *Schedule) Next(t time.Time) time.Time {
 	return time.Time{}
 }
 
-// dayMatches applies the Vixie day-of-month / day-of-week rule.
+// dayMatches reports whether t satisfies both the day-of-month and day-of-week
+// fields. The two are combined with AND, following Elixir Oban. A "*" field has
+// its full range set, so it is always satisfied and the other field alone
+// constrains the day.
 func (s *Schedule) dayMatches(t time.Time) bool {
 	domOK := s.doms&(1<<uint(t.Day())) != 0
 	dowOK := s.dows&(1<<uint(t.Weekday())) != 0
-	switch {
-	case s.domStar && s.dowStar:
-		return true
-	case s.domStar:
-		return dowOK
-	case s.dowStar:
-		return domOK
-	default:
-		return domOK || dowOK
-	}
+	return domOK && dowOK
 }

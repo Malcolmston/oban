@@ -209,8 +209,8 @@ func TestCronPluginFireDue(t *testing.T) {
 			want:    nil,
 		},
 		{
-			name:    "impossible schedule never fires",
-			entries: []Periodic{{Schedule: MustParseCron("0 0 31 2 *"), Worker: "never"}},
+			name:    "far-future schedule never fires within the window",
+			entries: []Periodic{{Schedule: MustParseCron("0 0 1 1 *"), Worker: "never"}},
 			steps:   []time.Duration{time.Minute, time.Hour, 24 * time.Hour},
 			want:    nil,
 		},

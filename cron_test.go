@@ -81,10 +81,10 @@ func TestScheduleNext(t *testing.T) {
 			want: time.Date(2027, 1, 1, 0, 0, 0, 0, loc),
 		},
 		{
-			name: "dom or dow when both set",
-			expr: "0 0 13 * fri",                          // 13th OR any Friday
-			from: time.Date(2026, 7, 17, 0, 1, 0, 0, loc), // Fri Jul 17
-			want: time.Date(2026, 7, 24, 0, 0, 0, 0, loc), // next Friday
+			name: "dom and dow when both set",
+			expr: "0 0 13 * fri",                           // Oban AND rule: the 13th AND a Friday
+			from: time.Date(2026, 7, 17, 0, 1, 0, 0, loc),  // Fri Jul 17
+			want: time.Date(2026, 11, 13, 0, 0, 0, 0, loc), // next Friday the 13th
 		},
 		{
 			name: "sunday as 0 and 7",
@@ -118,10 +118,11 @@ func TestScheduleNextStrictlyAfter(t *testing.T) {
 }
 
 func TestScheduleNextImpossible(t *testing.T) {
-	// February 31st never occurs.
-	s := MustParseCron("0 0 31 2 *")
-	if got := s.Next(baseTime); !got.IsZero() {
-		t.Errorf("impossible schedule returned %v, want zero time", got)
+	// February 31st never occurs, so like Elixir Oban the expression is
+	// rejected at parse time rather than parsing into a schedule that never
+	// fires.
+	if _, err := ParseCron("0 0 31 2 *"); err == nil {
+		t.Fatal("ParseCron(\"0 0 31 2 *\") = nil error, want rejection of impossible day/month pairing")
 	}
 }
 
