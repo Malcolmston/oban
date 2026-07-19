@@ -1,0 +1,9 @@
+name: Parity
+on:
+  push: { branches: [main] }
+  pull_request: {}
+  workflow_dispatch: {}
+permissions: { contents: read }
+jobs:
+  parity:
+    uses: Malcolmston/go/.github/workflows/parity-reusable.yml@main
