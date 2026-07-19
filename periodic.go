@@ -28,10 +28,16 @@ type cronEntry struct {
 // implements [container/heap.Interface].
 type cronHeap []*cronEntry
 
+// Len implements sort.Interface (via heap.Interface), reporting the number of
+// entries in the heap.
 func (h cronHeap) Len() int { return len(h) }
 
+// Less implements sort.Interface (via heap.Interface), reporting whether the
+// entry at index i fires before the entry at index j.
 func (h cronHeap) Less(i, j int) bool { return h[i].next.Before(h[j].next) }
 
+// Swap implements sort.Interface (via heap.Interface), exchanging the entries
+// at indexes i and j and updating their cached heap indexes.
 func (h cronHeap) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
 	h[i].index = i
