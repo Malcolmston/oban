@@ -3,15 +3,36 @@ package oban
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
 
 // pluginsFakePrunable records DeleteFinishedBefore calls for assertion.
+//
+// mu is load-bearing, not defensive boilerplate: the Supervisor runs each plugin
+// on its own goroutine, so a test that starts a supervisor observes this fake from
+// the test goroutine while the plugin loop is still writing to it. The race
+// detector caught exactly that — DeleteFinishedBefore appending while
+// TestSupervisorStartStop polled len(calls). Read through callCount/callAt rather
+// than touching calls directly.
 type pluginsFakePrunable struct {
+	mu    sync.Mutex
 	calls []pluginsPruneCall
 	ret   int64
 	err   error
+}
+
+func (f *pluginsFakePrunable) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+func (f *pluginsFakePrunable) callAt(i int) pluginsPruneCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[i]
 }
 
 type pluginsPruneCall struct {
@@ -21,15 +42,31 @@ type pluginsPruneCall struct {
 }
 
 func (f *pluginsFakePrunable) DeleteFinishedBefore(_ context.Context, states []State, cutoff time.Time, limit int) (int64, error) {
+	f.mu.Lock()
 	f.calls = append(f.calls, pluginsPruneCall{states: states, cutoff: cutoff, limit: limit})
-	return f.ret, f.err
+	ret, err := f.ret, f.err
+	f.mu.Unlock()
+	return ret, err
 }
 
 // pluginsFakeRescuable records RescueExecuting calls for assertion.
 type pluginsFakeRescuable struct {
+	mu                 sync.Mutex
 	calls              []pluginsRescueCall
 	rescued, discarded int64
 	err                error
+}
+
+func (f *pluginsFakeRescuable) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+func (f *pluginsFakeRescuable) callAt(i int) pluginsRescueCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[i]
 }
 
 type pluginsRescueCall struct {
@@ -38,8 +75,11 @@ type pluginsRescueCall struct {
 }
 
 func (f *pluginsFakeRescuable) RescueExecuting(_ context.Context, olderThan, now time.Time) (int64, int64, error) {
+	f.mu.Lock()
 	f.calls = append(f.calls, pluginsRescueCall{olderThan: olderThan, now: now})
-	return f.rescued, f.discarded, f.err
+	rescued, discarded, err := f.rescued, f.discarded, f.err
+	f.mu.Unlock()
+	return rescued, discarded, err
 }
 
 // pluginsFakeEnqueuer records enqueued jobs and can inject an error.
@@ -101,10 +141,10 @@ func TestPrunerPrune(t *testing.T) {
 			p := NewPruner(store, clock, tt.cfg)
 			p.prune(context.Background())
 
-			if len(store.calls) != 1 {
-				t.Fatalf("got %d calls, want 1", len(store.calls))
+			if store.callCount() != 1 {
+				t.Fatalf("got %d calls, want 1", store.callCount())
 			}
-			call := store.calls[0]
+			call := store.callAt(0)
 			if !pluginsEqualStates(call.states, tt.wantStates) {
 				t.Errorf("states = %v, want %v", call.states, tt.wantStates)
 			}
@@ -155,10 +195,10 @@ func TestLifelineRescue(t *testing.T) {
 			l := NewLifeline(store, clock, LifelineConfig{RescueAfter: tt.rescueAfter})
 			l.rescue(context.Background())
 
-			if len(store.calls) != 1 {
-				t.Fatalf("got %d calls, want 1", len(store.calls))
+			if store.callCount() != 1 {
+				t.Fatalf("got %d calls, want 1", store.callCount())
 			}
-			call := store.calls[0]
+			call := store.callAt(0)
 			if !call.now.Equal(baseTime) {
 				t.Errorf("now = %v, want %v", call.now, baseTime)
 			}
@@ -286,7 +326,7 @@ func TestSupervisorStartStop(t *testing.T) {
 
 	// Wait until the pruner has run at least once.
 	deadline := time.After(2 * time.Second)
-	for len(store.calls) == 0 {
+	for store.callCount() == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("pruner never ran")
